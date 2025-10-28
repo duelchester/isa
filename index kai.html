@@ -1,25 +1,141 @@
-// Import the functions you need from the SDKs you need
-import { initializeApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>コメント欄（ツリー式返信対応）</title>
+<style>
+  body { font-family: "Segoe UI", sans-serif; background: #fff; margin: 40px; }
+  .comment-box { max-width: 750px; margin: auto; }
+  textarea { width: 100%; padding: 8px; border-radius: 6px; }
+  button { margin-top: 6px; cursor: pointer; padding: 6px 10px; border-radius: 6px; }
+  .comment, .reply {
+    background: #f9f9f9; padding: 10px; border-radius: 10px;
+    margin-top: 10px; position: relative;
+  }
+  .reply { background: #f0f0f0; margin-left: 25px; }
+  .nickname { font-weight: bold; }
+  .timestamp { font-size: 11px; color: gray; margin-left: 5px; }
+  .reply-button { font-size: 12px; color: #007BFF; background: none; border: none; cursor: pointer; padding: 0; margin-top: 4px; }
+  .reply-form { margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="comment-box">
+  <h2>コメント欄（ツリー式返信対応）</h2>
+  <input id="nicknameInput" placeholder="ニックネーム" style="width:100%;padding:8px;margin-bottom:6px;">
+  <textarea id="newComment" rows="3" placeholder="コメントを入力..."></textarea>
+  <button id="postBtn">投稿</button>
+  <div id="commentsContainer"></div>
+</div>
 
-// Your web app's Firebase configuration
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
-const firebaseConfig = {
-  apiKey: "AIzaSyBNdabByAcSE8ChYUwDQpmcvq4VaQLGzM8",
-  authDomain: "web-comments-8bc1f.firebaseapp.com",
-  databaseURL: "https://web-comments-8bc1f-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "web-comments-8bc1f",
-  storageBucket: "web-comments-8bc1f.firebasestorage.app",
-  messagingSenderId: "876470253365",
-  appId: "1:876470253365:web:e3bb93768c5c6c778c3e7c",
-  measurementId: "G-QDKXXL9062"
-};
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+  import { getDatabase, ref, push, onValue } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
+  const firebaseConfig = {
+    apiKey: "AIzaSyBn_w4fPZlFXqfiwYzJzUKuW10LdJyV-AA",
+    authDomain: "comments-1910e.firebaseapp.com",
+    databaseURL: "https://comments-1910e-default-rtdb.firebaseio.com",
+    projectId: "comments-1910e",
+    storageBucket: "comments-1910e.firebasestorage.app",
+    messagingSenderId: "126460518015",
+    appId: "1:126460518015:web:0595fd3bd496224c8c294a",
+    measurementId: "G-SXTPFYM6V5"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
+  const commentsRef = ref(db, "comments");
+
+  const postBtn = document.getElementById("postBtn");
+  const newComment = document.getElementById("newComment");
+  const nicknameInput = document.getElementById("nicknameInput");
+  const commentsContainer = document.getElementById("commentsContainer");
+
+  postBtn.addEventListener("click", () => {
+    const text = newComment.value.trim();
+    const nick = nicknameInput.value.trim() || "匿名";
+    if (!text) return alert("コメントを入力してください。");
+    push(commentsRef, makeComment(nick, text));
+    newComment.value = "";
+  });
+
+  function makeComment(author, text) {
+    return { author, text, timestamp: Date.now(), replies: {} };
+  }
+
+  // 🔁 コメントツリーをリアルタイムで描画
+  onValue(commentsRef, (snapshot) => {
+    commentsContainer.innerHTML = "";
+    const data = snapshot.val();
+    if (!data) return;
+    const comments = Object.entries(data).reverse();
+    comments.forEach(([id, c]) => renderComment(id, c, commentsContainer, 0));
+  });
+
+  // 🧩 再帰的にコメントを描画
+  function renderComment(id, comment, container, level) {
+    const div = document.createElement("div");
+    div.className = level === 0 ? "comment" : "reply";
+    const time = new Date(comment.timestamp).toLocaleString();
+
+    div.innerHTML = `
+      <div><span class="nickname">${comment.author}</span>
+      <span class="timestamp">${time}</span></div>
+      <div>${comment.text}</div>
+      <button class="reply-button" data-id="${id}">返信する</button>
+      <div class="children"></div>
+    `;
+
+    const children = div.querySelector(".children");
+    if (comment.replies) {
+      const replies = Object.entries(comment.replies);
+      replies.forEach(([rid, reply]) => renderComment(rid, reply, children, level + 1));
+    }
+
+    // 返信ボタン押下
+    const replyBtn = div.querySelector(".reply-button");
+    replyBtn.addEventListener("click", () => {
+      showReplyForm(containerPath(id, level), children);
+    });
+
+    container.appendChild(div);
+  }
+
+  // 🔍 Firebaseの階層パスを取得
+  function containerPath(id, level) {
+    if (level === 0) return `comments/${id}/replies`;
+    return `comments/${id}`;
+  }
+
+  // ✏️ 返信フォーム
+  function showReplyForm(path, parentDiv) {
+    const existingForm = parentDiv.querySelector(".reply-form");
+    if (existingForm) existingForm.remove();
+
+    const form = document.createElement("div");
+    form.className = "reply-form";
+    form.innerHTML = `
+      <input type="text" placeholder="ニックネーム" class="reply-nick" style="width:100%;padding:6px;margin-top:4px;">
+      <textarea class="reply-text" rows="2" style="width:100%;margin-top:4px;"></textarea>
+      <button class="send-reply">返信を投稿</button>
+    `;
+    parentDiv.appendChild(form);
+
+    const sendBtn = form.querySelector(".send-reply");
+    sendBtn.addEventListener("click", () => {
+      const nick = form.querySelector(".reply-nick").value.trim() || "匿名";
+      const text = form.querySelector(".reply-text").value.trim();
+      if (!text) return alert("返信を入力してください。");
+      const replyRef = ref(db, path);
+      push(replyRef, makeComment(nick, text));
+      form.remove();
+    });
+  }
+</script>
+</body>
+</html>
 
 <!doctype html>
 <html lang="ja">
